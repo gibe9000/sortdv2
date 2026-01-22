@@ -20,17 +20,25 @@ export async function GET(request: Request) {
                 const { data: { session: fullSession } } = await supabase.auth.getSession();
                 if (fullSession?.provider_token) {
                     const user = fullSession.user;
+                    console.log('[Auth Callback] Saving tokens for user:', user.id);
+
                     const expiresAt = new Date();
                     expiresAt.setSeconds(expiresAt.getSeconds() + (fullSession.expires_in || 3600));
 
-                    // We need to upsert this to gmail_tokens.
-
-                    await supabase.from('gmail_tokens').upsert({
+                    const { error: upsertError } = await supabase.from('gmail_tokens').upsert({
                         user_id: user.id,
                         access_token: fullSession.provider_token,
-                        refresh_token: fullSession.provider_refresh_token || '', // Might be missing on re-auth without prompt=consent
+                        refresh_token: fullSession.provider_refresh_token || '',
                         expires_at: expiresAt.toISOString()
-                    })
+                    });
+
+                    if (upsertError) {
+                        console.error('[Auth Callback] Token upsert failed:', upsertError);
+                    } else {
+                        console.log('[Auth Callback] Tokens saved successfully.');
+                    }
+                } else {
+                    console.warn('[Auth Callback] No provider_token found in session.');
                 }
             }
 

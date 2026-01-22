@@ -37,7 +37,10 @@ serve(async (req) => {
             .eq('user_id', user.id)
             .single();
 
+        console.log(`[fetch-labels] User ${user.id} - Token data found: ${!!tokenData}`);
+
         if (!tokenData) {
+            console.error(`[fetch-labels] No tokens found for user ${user.id}`);
             return new Response(
                 JSON.stringify({ error: 'Gmail not connected' }),
                 { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -47,6 +50,7 @@ serve(async (req) => {
         // Refresh token if needed
         let accessToken = tokenData.access_token;
         if (new Date(tokenData.expires_at) < new Date()) {
+            console.log(`[fetch-labels] refreshing token...`);
             accessToken = await refreshToken(tokenData.refresh_token, supabase, user.id);
         }
 

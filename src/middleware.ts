@@ -8,14 +8,10 @@ export async function middleware(request: NextRequest) {
         },
     });
 
-    // Skip auth logic entirely for auth routes - just pass through
-    if (request.nextUrl.pathname.startsWith("/auth")) {
-        return response;
-    }
-
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
+    // Dev fallback: if env vars are missing, skip Supabase auth and allow request to proceed
     if (!supabaseUrl || !supabaseAnonKey) {
         return response;
     }
@@ -47,6 +43,11 @@ export async function middleware(request: NextRequest) {
         data: { user },
     } = await supabase.auth.getUser();
 
+    // Don't redirect for auth routes - just let them process cookies and continue
+    if (request.nextUrl.pathname.startsWith("/auth")) {
+        return response;
+    }
+
     // If user is signed in and trying to access the landing page, redirect to dashboard
     if (user && request.nextUrl.pathname === "/") {
         return NextResponse.redirect(new URL("/dashboard", request.url));
@@ -62,6 +63,15 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
     matcher: [
+        /*
+         * Match all request paths except for the ones starting with:
+         * - _next/static (static files)
+         * - _next/image (image optimization files)
+         * - favicon.ico (favicon file)
+         * - privacy (public policy page)
+         * 
+         * NOTE: /auth routes ARE included so cookies (PKCE verifier) are handled properly
+         */
         "/((?!_next/static|_next/image|favicon.ico|privacy).*)",
     ],
 };

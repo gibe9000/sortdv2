@@ -11,35 +11,65 @@ export async function GET(request: Request) {
         const supabase = await createClient()
         const { error } = await supabase.auth.exchangeCodeForSession(code)
         if (!error) {
+            const {
+                data: { user },
+                error: userError,
+            } = await supabase.auth.getUser()
 
-            // Check for Google tokens and store them if they exist in the session
+            if (userError) {
+                console.error('[Auth Callback] Failed to fetch authenticated user:', userError)
+            }
 
-            const { data: { session } } = await supabase.auth.getSession()
-            if (session?.provider_token && session?.provider_refresh_token && session?.user) {
+            const {
+                data: { session },
+                error: sessionError,
+            } = await supabase.auth.getSession()
 
-                const { data: { session: fullSession } } = await supabase.auth.getSession();
-                if (fullSession?.provider_token) {
-                    const user = fullSession.user;
-                    console.log('[Auth Callback] Saving tokens for user:', user.id);
+            if (sessionError) {
+                console.error('[Auth Callback] Failed to fetch session:', sessionError)
+            }
 
-                    const expiresAt = new Date();
-                    expiresAt.setSeconds(expiresAt.getSeconds() + (fullSession.expires_in || 3600));
+            const authenticatedUser = user ?? session?.user
 
-                    const { error: upsertError } = await supabase.from('gmail_tokens').upsert({
-                        user_id: user.id,
-                        access_token: fullSession.provider_token,
-                        refresh_token: fullSession.provider_refresh_token || '',
-                        expires_at: expiresAt.toISOString()
-                    });
+            if (authenticatedUser) {
+                const { error: profileUpsertError } = await supabase
+                    .from('profiles')
+                    .upsert(
+                        {
+                            id: authenticatedUser.id,
+                            email: authenticatedUser.email ?? '',
+                        },
+                        { onConflict: 'id' }
+                    )
 
-                    if (upsertError) {
-                        console.error('[Auth Callback] Token upsert failed:', upsertError);
-                    } else {
-                        console.log('[Auth Callback] Tokens saved successfully.');
-                    }
-                } else {
-                    console.warn('[Auth Callback] No provider_token found in session.');
+                if (profileUpsertError) {
+                    console.error('[Auth Callback] Profile upsert failed:', profileUpsertError)
                 }
+            }
+
+            if (session?.provider_token && authenticatedUser) {
+                console.log('[Auth Callback] Saving Google tokens for user:', authenticatedUser.id)
+
+                const expiresAt = new Date()
+                expiresAt.setSeconds(expiresAt.getSeconds() + (session.expires_in || 3600))
+
+                const { error: upsertError } = await supabase.from('gmail_tokens').upsert(
+                    {
+                        user_id: authenticatedUser.id,
+                        access_token: session.provider_token,
+                        refresh_token: session.provider_refresh_token || '',
+                        expires_at: expiresAt.toISOString(),
+                    },
+                    { onConflict: 'user_id' }
+                )
+
+                if (upsertError) {
+                    console.error('[Auth Callback] Token upsert failed:', upsertError)
+                } else {
+                    console.log('[Auth Callback] Tokens saved successfully.')
+                }
+            } else {
+                console.warn('[Auth Callback] Missing provider_token or authenticated user after OAuth callback.')
             }
 
             const forwardedHost = request.headers.get('x-forwarded-host') // original origin before load balancer

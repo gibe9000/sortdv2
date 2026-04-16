@@ -1,3 +1,4 @@
+
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
@@ -43,11 +44,6 @@ export async function middleware(request: NextRequest) {
         data: { user },
     } = await supabase.auth.getUser();
 
-    // Don't redirect for auth routes - just let them process cookies and continue
-    if (request.nextUrl.pathname.startsWith("/auth")) {
-        return response;
-    }
-
     // If user is signed in and trying to access the landing page, redirect to dashboard
     if (user && request.nextUrl.pathname === "/") {
         return NextResponse.redirect(new URL("/dashboard", request.url));
@@ -68,10 +64,10 @@ export const config = {
          * - _next/static (static files)
          * - _next/image (image optimization files)
          * - favicon.ico (favicon file)
+         * - auth (auth routes)
          * - privacy (public policy page)
-         * 
-         * NOTE: /auth routes ARE included so cookies (PKCE verifier) are handled properly
+         * Feel free to modify this pattern to include more paths.
          */
-        "/((?!_next/static|_next/image|favicon.ico|privacy).*)",
+        "/((?!_next/static|_next/image|favicon.ico|auth|privacy).*)",
     ],
 };

@@ -8,23 +8,21 @@ export function LoginButton() {
     )
 
     const handleLogin = async () => {
-        if (!hasSupabase) {
-            console.warn('Supabase env vars are not set; skipping login in local dev.')
-            return
-        }
-        const supabase = createClient()
-        await supabase.auth.signInWithOAuth({
-            provider: 'google',
-            options: {
-                redirectTo: `${location.origin}/auth/callback`,
-                queryParams: {
-                    access_type: 'offline',
-                    prompt: 'consent',
-                },
-                scopes: 'https://www.googleapis.com/auth/gmail.labels https://www.googleapis.com/auth/gmail.modify email profile openid'
+    if (!hasSupabase) return
+    
+    const supabase = createClient()
+    await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+            redirectTo: 'https://sortdv2.vercel.app/auth/callback',  // <-- Hardcoded
+            queryParams: {
+                access_type: 'offline',
+                prompt: 'consent',
             },
-        })
-    }
+            scopes: 'https://www.googleapis.com/auth/gmail.labels https://www.googleapis.com/auth/gmail.modify email profile openid'
+        },
+    })
+}
 
     return (
         <button

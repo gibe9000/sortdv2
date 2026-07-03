@@ -42,7 +42,7 @@ serve(async (req) => {
         if (!tokenData) {
             console.error(`[fetch-labels] No tokens found for user ${user.id}`);
             return new Response(
-                JSON.stringify({ error: 'Gmail not connected' }),
+                JSON.stringify({ error: 'reconnect_required' }),
                 { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
             );
         }
@@ -51,7 +51,23 @@ serve(async (req) => {
         let accessToken = tokenData.access_token;
         if (new Date(tokenData.expires_at) < new Date()) {
             console.log(`[fetch-labels] refreshing token...`);
-            accessToken = await refreshToken(tokenData.refresh_token, supabase, user.id);
+            try {
+                accessToken = await refreshToken(tokenData.refresh_token, supabase, user.id);
+            } catch (e: any) {
+                if (e.message === 'INVALID_GRANT') {
+                    // Refresh token revoked/expired - flag the profile so the dashboard
+                    // shows a reconnect banner instead of failing silently.
+                    await supabase
+                        .from('profiles')
+                        .update({ gmail_status: 'reconnect_required' })
+                        .eq('id', user.id);
+                    return new Response(
+                        JSON.stringify({ error: 'reconnect_required' }),
+                        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+                    );
+                }
+                throw e;
+            }
         }
 
         // Fetch Gmail labels
@@ -59,6 +75,14 @@ serve(async (req) => {
             'https://gmail.googleapis.com/gmail/v1/users/me/labels',
             { headers: { Authorization: `Bearer ${accessToken}` } }
         );
+
+        if (!response.ok) {
+            console.error(`[fetch-labels] Gmail API error ${response.status}:`, await response.text());
+            return new Response(
+                JSON.stringify({ error: 'gmail_api_error' }),
+                { status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+            );
+        }
 
         const data = await response.json();
 
@@ -76,21 +100,22 @@ serve(async (req) => {
         );
 
     } catch (error) {
+        console.error('[fetch-labels] Unexpected error:', error);
         return new Response(
-            JSON.stringify({ error: error.message }),
+            JSON.stringify({ error: 'internal' }),
             { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
     }
 });
 
-async function refreshToken(refreshToken: string, supabase: any, userId: string): Promise<string> {
+async function refreshToken(refreshTokenValue: string, supabase: any, userId: string): Promise<string> {
     const response = await fetch('https://oauth2.googleapis.com/token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({
             client_id: Deno.env.get('GOOGLE_CLIENT_ID')!,
             client_secret: Deno.env.get('GOOGLE_CLIENT_SECRET')!,
-            refresh_token: refreshToken,
+            refresh_token: refreshTokenValue,
             grant_type: 'refresh_token'
         })
     });
@@ -109,5 +134,9 @@ async function refreshToken(refreshToken: string, supabase: any, userId: string)
         return data.access_token;
     }
 
+    // Log error fields only - never the full response
+    console.error(`[fetch-labels] Token refresh failed for user ${userId}: ${data.error} - ${data.error_description}`);
+
+    if (data.error === 'invalid_grant') throw new Error('INVALID_GRANT');
     throw new Error('Failed to refresh token');
 }

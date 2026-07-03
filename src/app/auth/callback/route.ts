@@ -50,23 +50,38 @@ export async function GET(request: Request) {
             if (session?.provider_token && authenticatedUser) {
                 console.log('[Auth Callback] Saving Google tokens for user:', authenticatedUser.id)
 
+                // Google access tokens live ~1 hour. session.expires_in is the
+                // Supabase session's expiry, not the Google token's - don't use it here.
                 const expiresAt = new Date()
-                expiresAt.setSeconds(expiresAt.getSeconds() + (session.expires_in || 3600))
+                expiresAt.setSeconds(expiresAt.getSeconds() + 3600)
 
-                const { error: upsertError } = await supabase.from('gmail_tokens').upsert(
-                    {
-                        user_id: authenticatedUser.id,
-                        access_token: session.provider_token,
-                        refresh_token: session.provider_refresh_token || '',
-                        expires_at: expiresAt.toISOString(),
-                    },
-                    { onConflict: 'user_id' }
-                )
+                // Google only returns a refresh token on consent. Never overwrite a
+                // stored refresh token with an empty value on re-login.
+                const tokenRow: Record<string, string> = {
+                    user_id: authenticatedUser.id,
+                    access_token: session.provider_token,
+                    expires_at: expiresAt.toISOString(),
+                }
+                if (session.provider_refresh_token) {
+                    tokenRow.refresh_token = session.provider_refresh_token
+                }
+
+                const { error: upsertError } = await supabase
+                    .from('gmail_tokens')
+                    .upsert(tokenRow, { onConflict: 'user_id' })
 
                 if (upsertError) {
                     console.error('[Auth Callback] Token upsert failed:', upsertError)
                 } else {
                     console.log('[Auth Callback] Tokens saved successfully.')
+                    // A fresh grant means the connection is healthy again
+                    const { error: statusError } = await supabase
+                        .from('profiles')
+                        .update({ gmail_status: 'connected' })
+                        .eq('id', authenticatedUser.id)
+                    if (statusError) {
+                        console.error('[Auth Callback] Failed to reset gmail_status:', statusError)
+                    }
                 }
             } else {
                 console.warn('[Auth Callback] Missing provider_token or authenticated user after OAuth callback.')

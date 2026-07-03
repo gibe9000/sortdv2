@@ -1,6 +1,7 @@
 'use client'
 
 import { createClient } from '@/lib/supabase/client'
+import { googleOAuthOptions } from '@/lib/googleOAuth'
 
 export function LoginButton() {
     const hasSupabase = Boolean(
@@ -15,14 +16,7 @@ export function LoginButton() {
         const supabase = createClient()
         await supabase.auth.signInWithOAuth({
             provider: 'google',
-            options: {
-                redirectTo: `${location.origin}/auth/callback`,
-                queryParams: {
-                    access_type: 'offline',
-                    prompt: 'consent',
-                },
-                scopes: 'https://www.googleapis.com/auth/gmail.labels https://www.googleapis.com/auth/gmail.modify email profile openid'
-            },
+            options: googleOAuthOptions(),
         })
     }
 

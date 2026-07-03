@@ -4,6 +4,8 @@ import { createClient } from '@/lib/supabase/server';
 import { SortingToggle } from '@/components/SortingToggle';
 import { LabelSelector } from '@/components/LabelSelector';
 import { LogoutButton } from '@/components/LogoutButton';
+import { ReconnectBanner } from '@/components/ReconnectBanner';
+import { ActivityFeed } from '@/components/ActivityFeed';
 
 export default async function Dashboard() {
     const supabase = await createClient();
@@ -29,6 +31,15 @@ export default async function Dashboard() {
         .select('*')
         .eq('user_id', user.id);
 
+    // Last labelled emails for the activity feed (no-match rows have a null label name)
+    const { data: recentActivity } = await supabase
+        .from('processed_emails')
+        .select('gmail_message_id, subject, sender, gmail_label_name, processed_at')
+        .eq('user_id', user.id)
+        .not('gmail_label_name', 'is', null)
+        .order('processed_at', { ascending: false })
+        .limit(8);
+
     return (
         <div className="min-h-screen bg-[#0a0a0f] text-slate-200">
             {/* Scanline */}
@@ -50,6 +61,9 @@ export default async function Dashboard() {
                     </span>
                 </div>
 
+                {/* Gmail connection lost -> reconnect */}
+                {profile?.gmail_status === 'reconnect_required' && <ReconnectBanner />}
+
                 {/* Main Toggle Card */}
                 <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-6 mb-6">
                     <SortingToggle
@@ -60,6 +74,9 @@ export default async function Dashboard() {
 
                 {/* Label Selection */}
                 <LabelSelector selectedLabels={selectedLabels ?? []} />
+
+                {/* Activity Feed */}
+                <ActivityFeed items={recentActivity ?? []} />
 
                 {/* Footer */}
                 <div className="mt-12 pt-6 border-t border-slate-800">

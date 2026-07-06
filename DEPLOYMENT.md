@@ -15,11 +15,21 @@ compromised.
 
 ## 2. Create the cron secret
 
-```bash
-# generate a random secret
-openssl rand -hex 32
+Generate a random secret with whichever tool you have:
 
-# make it available to the edge function
+```bash
+# Node
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
+```powershell
+# PowerShell
+-join ((1..64) | ForEach-Object { '{0:x}' -f (Get-Random -Max 16) })
+```
+
+Then make it available to the edge function:
+
+```bash
 supabase secrets set CRON_SECRET=<value>
 ```
 

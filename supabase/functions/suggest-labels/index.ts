@@ -78,7 +78,14 @@ serve(async (req) => {
         }
 
         if (action === 'suggest') {
-            return json(await suggestLabels(supabase, user.id, accessToken));
+            const pageToken = typeof body?.pageToken === 'string' ? body.pageToken : null;
+            const exclude = Array.isArray(body?.exclude)
+                ? body.exclude
+                    .filter((n: any) => typeof n === 'string' && n.trim())
+                    .slice(0, 30)
+                    .map((n: string) => n.trim().slice(0, 40))
+                : [];
+            return json(await suggestLabels(supabase, user.id, accessToken, pageToken, exclude));
         }
 
         if (action === 'create') {
@@ -130,11 +137,20 @@ function extractPlainText(payload: any): string {
     return '';
 }
 
-async function suggestLabels(supabase: any, userId: string, accessToken: string) {
-    const listResponse = await fetch(
-        `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent('in:inbox')}&maxResults=${MAX_EMAILS}`,
-        { headers: { Authorization: `Bearer ${accessToken}` } }
-    );
+async function suggestLabels(
+    supabase: any,
+    userId: string,
+    accessToken: string,
+    pageToken: string | null = null,
+    exclude: string[] = []
+) {
+    // pageToken pages 50 emails further back in the mailbox per request,
+    // so "More suggestions" analyzes fresh mail instead of the same batch.
+    const listUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent('in:inbox')}&maxResults=${MAX_EMAILS}`
+        + (pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : '');
+    const listResponse = await fetch(listUrl, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+    });
     if (!listResponse.ok) {
         console.error('[suggest-labels] Gmail list failed:', await listResponse.text());
         return { error: 'gmail_api_error' };
@@ -142,8 +158,12 @@ async function suggestLabels(supabase: any, userId: string, accessToken: string)
 
     const listData = await listResponse.json();
     const messages: Array<{ id: string }> = listData.messages || [];
+    const nextPageToken: string | null = listData.nextPageToken || null;
 
-    if (messages.length < 5) {
+    if (messages.length === 0) {
+        return { error: pageToken ? 'no_more_emails' : 'not_enough_emails' };
+    }
+    if (messages.length < 5 && !pageToken) {
         return { error: 'not_enough_emails' };
     }
 
@@ -208,10 +228,17 @@ async function suggestLabels(supabase: any, userId: string, accessToken: string)
         .map((e, i) => `${i + 1}. From: ${e.from} | Subject: ${e.subject}\n${e.body}`)
         .join('\n\n');
 
+    const rejectedList = exclude.length
+        ? exclude.map((n) => `- ${n}`).join('\n')
+        : '(none)';
+
     const prompt = `You are helping a Gmail user organize their inbox. Based on their recent emails below, suggest NEW Gmail labels that would meaningfully organize the mail their existing labels do not already cover.
 
 The user's EXISTING labels:
 ${existingList}
+
+Label ideas the user ALREADY REJECTED (do not suggest these or close variants of them):
+${rejectedList}
 
 Rules:
 - CRITICAL: never suggest a label that duplicates or overlaps in meaning with an existing label, even under a different name (e.g. do not suggest "Security Alerts" if "Account security notifications" exists). Assume the existing labels already handle their topics.
@@ -280,16 +307,16 @@ Return a JSON array of {"name": ..., "description": ...}.`;
     }
 
     // Belt-and-braces dedup: drop suggestions whose normalized name matches
-    // or contains/is contained by an existing label name.
+    // or contains/is contained by an existing label name or a rejected idea.
     const normalize = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
-    const existingNorm = existingNames.map(normalize).filter(Boolean);
+    const blockedNorm = [...existingNames, ...exclude].map(normalize).filter(Boolean);
     suggestions = suggestions.filter((s) => {
         const n = normalize(s.name);
-        return n && !existingNorm.some((e) => e === n || e.includes(n) || n.includes(e));
+        return n && !blockedNorm.some((e) => e === n || e.includes(n) || n.includes(e));
     });
 
     // An empty array is a legitimate answer: existing labels cover the mailbox
-    return { suggestions, analyzed: emails.length };
+    return { suggestions, analyzed: emails.length, nextPageToken };
 }
 
 async function createLabels(

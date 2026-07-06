@@ -40,7 +40,7 @@ Put the value in **two places** (they must match):
 - **Vault:** Dashboard → Project Settings → Vault → new secret named `cron_secret`
   (the cron job reads it from here)
 
-## 3. Apply the database migration
+## 3. Apply the database migrations
 
 Copy `supabase/migrations/003_audit_fixes.sql` into the SQL editor and run it. It:
 
@@ -48,6 +48,22 @@ Copy `supabase/migrations/003_audit_fixes.sql` into the SQL editor and run it. I
 - adds `profiles.gmail_status` (reconnect detection)
 - adds `selected_labels.description` and `selected_labels.archive_on_label`
 - adds `processed_emails.subject`, `.sender`, `.gmail_label_name` + a user SELECT policy (activity feed)
+
+Then run `supabase/migrations/004_tokens_service_role_only.sql`. It removes the remaining
+user INSERT/UPDATE policies on `gmail_tokens` — token writes now happen server-side only
+(see step 3b).
+
+## 3b. Add the service-role key to Vercel
+
+The auth callback now saves Google tokens with the service-role key (server-side only,
+never shipped to the browser):
+
+- Vercel → Project → Settings → Environment Variables → add
+  `SUPABASE_SERVICE_ROLE_KEY` = the **new** (rotated) service-role key.
+- Do **not** prefix it with `NEXT_PUBLIC_`.
+- Redeploy the frontend afterwards (env changes need a redeploy).
+
+Without this, logins succeed but Gmail tokens are never saved and labels won't load.
 
 ## 4. Update the edge functions in Supabase
 

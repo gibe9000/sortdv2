@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 
 export async function GET(request: Request) {
     const { searchParams, origin } = new URL(request.url)
@@ -66,22 +67,30 @@ export async function GET(request: Request) {
                     tokenRow.refresh_token = session.provider_refresh_token
                 }
 
-                const { error: upsertError } = await supabase
-                    .from('gmail_tokens')
-                    .upsert(tokenRow, { onConflict: 'user_id' })
+                // gmail_tokens has no RLS policies for users (so browser JS can
+                // never read refresh tokens). This route runs on the server, so
+                // write with the service-role client instead.
+                try {
+                    const admin = createAdminClient()
+                    const { error: upsertError } = await admin
+                        .from('gmail_tokens')
+                        .upsert(tokenRow, { onConflict: 'user_id' })
 
-                if (upsertError) {
-                    console.error('[Auth Callback] Token upsert failed:', upsertError)
-                } else {
-                    console.log('[Auth Callback] Tokens saved successfully.')
-                    // A fresh grant means the connection is healthy again
-                    const { error: statusError } = await supabase
-                        .from('profiles')
-                        .update({ gmail_status: 'connected' })
-                        .eq('id', authenticatedUser.id)
-                    if (statusError) {
-                        console.error('[Auth Callback] Failed to reset gmail_status:', statusError)
+                    if (upsertError) {
+                        console.error('[Auth Callback] Token upsert failed:', upsertError)
+                    } else {
+                        console.log('[Auth Callback] Tokens saved successfully.')
+                        // A fresh grant means the connection is healthy again
+                        const { error: statusError } = await admin
+                            .from('profiles')
+                            .update({ gmail_status: 'connected' })
+                            .eq('id', authenticatedUser.id)
+                        if (statusError) {
+                            console.error('[Auth Callback] Failed to reset gmail_status:', statusError)
+                        }
                     }
+                } catch (e) {
+                    console.error('[Auth Callback] Token save failed (is SUPABASE_SERVICE_ROLE_KEY set in Vercel?):', e)
                 }
             } else {
                 console.warn('[Auth Callback] Missing provider_token or authenticated user after OAuth callback.')

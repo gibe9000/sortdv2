@@ -162,7 +162,7 @@ export function LabelSelector({ selectedLabels }: Props) {
 
     return (
         <div>
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center justify-between mb-3">
                 <h2 className="text-sm font-mono text-slate-400 uppercase tracking-wider">
                     Labels for Sorting
                 </h2>
@@ -175,6 +175,16 @@ export function LabelSelector({ selectedLabels }: Props) {
                     {syncing ? '...' : '↻ Sync'}
                 </button>
             </div>
+
+            {/* AI suggestions live in their own slot above the list */}
+            {!loading && !loadError && (
+                <div className="mb-4">
+                    <LabelSuggestions
+                        hasGmailLabels={gmailLabels.length > 0}
+                        onCreated={handleSuggestionsCreated}
+                    />
+                </div>
+            )}
 
             {loading ? (
                 <div className="bg-slate-900/30 border border-slate-800 rounded-lg p-6">
@@ -195,33 +205,37 @@ export function LabelSelector({ selectedLabels }: Props) {
                     </button>
                 </div>
             ) : gmailLabels.length === 0 ? (
-                <div>
-                    <div className="bg-slate-900/30 border border-dashed border-slate-700 rounded-lg p-6">
-                        <p className="text-slate-500 font-mono text-sm text-center">
-                            No labels found in Gmail.
-                            <br />
-                            <span className="text-slate-600">
-                                Let Sortd suggest some based on your recent email.
-                            </span>
-                        </p>
-                    </div>
-                    <LabelSuggestions hasGmailLabels={false} onCreated={handleSuggestionsCreated} />
+                <div className="bg-slate-900/30 border border-dashed border-slate-700 rounded-lg p-6">
+                    <p className="text-slate-500 font-mono text-sm text-center">
+                        No labels found in Gmail.
+                        <br />
+                        <span className="text-slate-600">
+                            Use the suggestion button above, or create labels in Gmail and hit Sync.
+                        </span>
+                    </p>
                 </div>
             ) : (
-                <div className="bg-slate-900/30 border border-slate-800 rounded-lg divide-y divide-slate-800/50">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 items-start">
                     {gmailLabels.map(label => {
                         const isSelected = selected.has(label.id);
                         const labelSettings = settings.get(label.id);
                         return (
-                            <div key={label.id}>
+                            <div
+                                key={label.id}
+                                className={`rounded-lg border transition-colors ${
+                                    isSelected
+                                        ? 'border-emerald-500/30 bg-slate-900/50'
+                                        : 'border-slate-800 bg-slate-900/30'
+                                }`}
+                            >
                                 <button
                                     onClick={() => handleToggleLabel(label)}
-                                    className="w-full flex items-center gap-3 p-4 hover:bg-slate-800/30
-                                               transition-colors text-left"
+                                    className="w-full flex items-center gap-3 p-3 hover:bg-slate-800/30
+                                               transition-colors text-left rounded-lg"
                                 >
                                     <div
                                         className={`
-                                            w-5 h-5 rounded border-2 flex items-center justify-center
+                                            w-5 h-5 shrink-0 rounded border-2 flex items-center justify-center
                                             transition-all duration-200
                                             ${isSelected
                                                 ? 'bg-emerald-500/20 border-emerald-500'
@@ -236,7 +250,7 @@ export function LabelSelector({ selectedLabels }: Props) {
                                         )}
                                     </div>
                                     <span className={`
-                                        font-mono text-sm
+                                        font-mono text-sm truncate
                                         ${isSelected ? 'text-slate-200' : 'text-slate-400'}
                                     `}>
                                         {label.name}
@@ -245,7 +259,7 @@ export function LabelSelector({ selectedLabels }: Props) {
 
                                 {/* Per-label settings, shown when selected */}
                                 {isSelected && (
-                                    <div className="px-4 pb-4 pl-12 space-y-2">
+                                    <div className="px-3 pb-3 space-y-2">
                                         <input
                                             type="text"
                                             value={labelSettings?.description ?? ''}
@@ -253,7 +267,7 @@ export function LabelSelector({ selectedLabels }: Props) {
                                             onBlur={(e) => saveDescription(label.id, e.target.value)}
                                             placeholder="Describe what belongs here (improves AI accuracy)"
                                             maxLength={200}
-                                            className="w-full bg-slate-900/60 border border-slate-700 rounded px-3 py-2
+                                            className="w-full bg-slate-900/60 border border-slate-700 rounded px-3 py-1.5
                                                        text-slate-300 font-mono text-xs placeholder-slate-600
                                                        focus:outline-none focus:border-emerald-500/60"
                                         />
@@ -280,10 +294,6 @@ export function LabelSelector({ selectedLabels }: Props) {
                 <p className="text-amber-500/70 text-xs font-mono mt-3">
                     Select at least one label to enable sorting
                 </p>
-            )}
-
-            {gmailLabels.length > 0 && !loading && !loadError && (
-                <LabelSuggestions hasGmailLabels={true} onCreated={handleSuggestionsCreated} />
             )}
         </div>
     );

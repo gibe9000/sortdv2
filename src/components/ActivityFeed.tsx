@@ -22,8 +22,8 @@ function senderName(sender: string | null): string {
 
 export function ActivityFeed({ items }: Props) {
     return (
-        <div className="mt-6">
-            <h2 className="text-sm font-mono text-slate-400 uppercase tracking-wider mb-4">
+        <div>
+            <h2 className="text-sm font-mono text-slate-400 uppercase tracking-wider mb-3">
                 Recent Activity
             </h2>
 

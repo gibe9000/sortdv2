@@ -2,8 +2,9 @@
 //
 // Two actions, both authenticated as the logged-in user (JWT verification ON):
 //   { action: "suggest" }
-//     Reads the user's ~50 most recent inbox emails (metadata only) and asks
-//     Gemini to propose label names + descriptions. Nothing is created yet.
+//     Reads the user's ~50 most recent inbox emails (headers + a bounded
+//     ~500-char plain-text excerpt each) and asks Gemini to propose label
+//     names + descriptions. Nothing is created yet.
 //   { action: "create", labels: [{ name, description }] }
 //     Creates the confirmed labels in Gmail (gmail.labels scope) and selects
 //     them for sorting (inserts into selected_labels with the description).
@@ -105,8 +106,31 @@ serve(async (req) => {
     }
 });
 
+// Decode Gmail's base64url body data to text
+function decodeBody(data: string): string {
+    try {
+        const bin = atob(data.replace(/-/g, '+').replace(/_/g, '/'));
+        const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+        return new TextDecoder().decode(bytes);
+    } catch {
+        return '';
+    }
+}
+
+// Walk the MIME tree for the first text/plain part
+function extractPlainText(payload: any): string {
+    if (!payload) return '';
+    if (payload.mimeType === 'text/plain' && payload.body?.data) {
+        return decodeBody(payload.body.data);
+    }
+    for (const part of payload.parts || []) {
+        const text = extractPlainText(part);
+        if (text) return text;
+    }
+    return '';
+}
+
 async function suggestLabels(supabase: any, userId: string, accessToken: string) {
-    // Recent inbox mail only (metadata + snippet, never full bodies)
     const listResponse = await fetch(
         `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent('in:inbox')}&maxResults=${MAX_EMAILS}`,
         { headers: { Authorization: `Bearer ${accessToken}` } }
@@ -123,23 +147,28 @@ async function suggestLabels(supabase: any, userId: string, accessToken: string)
         return { error: 'not_enough_emails' };
     }
 
-    // Fetch metadata with modest concurrency to keep this reasonably fast
-    const emails: Array<{ from: string; subject: string; snippet: string }> = [];
+    // Fetch full messages (modest concurrency) and keep a bounded plain-text
+    // excerpt per email - enough signal to infer categories without shipping
+    // whole mailboxes to the LLM (token cost + Gmail Limited Use policy).
+    const emails: Array<{ from: string; subject: string; body: string }> = [];
     const CHUNK = 10;
     for (let i = 0; i < messages.length; i += CHUNK) {
         const chunk = messages.slice(i, i + CHUNK);
         const details = await Promise.all(chunk.map(async (msg) => {
             const res = await fetch(
-                `https://gmail.googleapis.com/gmail/v1/users/me/messages/${msg.id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject`,
+                `https://gmail.googleapis.com/gmail/v1/users/me/messages/${msg.id}?format=full`,
                 { headers: { Authorization: `Bearer ${accessToken}` } }
             );
             if (!res.ok) return null;
             const email = await res.json();
             const headers = email.payload?.headers || [];
+            const bodyText = (extractPlainText(email.payload) || email.snippet || '')
+                .replace(/\s+/g, ' ')
+                .trim();
             return {
                 from: (headers.find((h: any) => h.name === 'From')?.value || '').slice(0, 150),
                 subject: (headers.find((h: any) => h.name === 'Subject')?.value || '').slice(0, 150),
-                snippet: (email.snippet || '').slice(0, 200),
+                body: bodyText.slice(0, 500),
             };
         }));
         emails.push(...details.filter(Boolean) as typeof emails);
@@ -153,8 +182,8 @@ async function suggestLabels(supabase: any, userId: string, accessToken: string)
     const existingNames = (existing || []).map((l: any) => l.gmail_label_name);
 
     const emailList = emails
-        .map((e, i) => `${i + 1}. From: ${e.from} | Subject: ${e.subject} | ${e.snippet}`)
-        .join('\n');
+        .map((e, i) => `${i + 1}. From: ${e.from} | Subject: ${e.subject}\n${e.body}`)
+        .join('\n\n');
 
     const prompt = `You are helping a Gmail user organize their inbox. Based on their recent emails below, suggest 4 to 6 Gmail labels that would meaningfully organize this mailbox.
 

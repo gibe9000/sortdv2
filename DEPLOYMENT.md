@@ -53,17 +53,37 @@ Then run `supabase/migrations/004_tokens_service_role_only.sql`. It removes the 
 user INSERT/UPDATE policies on `gmail_tokens` — token writes now happen server-side only
 (see step 3b).
 
-## 3b. Add the service-role key to Vercel
+## 3b. Add a secret key to Vercel
 
-The auth callback now saves Google tokens with the service-role key (server-side only,
-never shipped to the browser):
+The auth callback now saves Google tokens with a privileged key (server-side only,
+never shipped to the browser). **Preferred: the new-style secret API key.**
 
-- Vercel → Project → Settings → Environment Variables → add
-  `SUPABASE_SERVICE_ROLE_KEY` = the **new** (rotated) service-role key.
-- Do **not** prefix it with `NEXT_PUBLIC_`.
-- Redeploy the frontend afterwards (env changes need a redeploy).
+1. Dashboard → Project Settings → API Keys → create/reveal a **secret key** (`sb_secret_...`).
+2. Vercel → Project → Settings → Environment Variables → add
+   `SUPABASE_SECRET_KEY` = that value. Do **not** prefix it with `NEXT_PUBLIC_`.
+3. Redeploy the frontend afterwards (env changes need a redeploy).
+
+(Legacy alternative: set `SUPABASE_SERVICE_ROLE_KEY` = the JWT service_role key.
+The code accepts either; `SUPABASE_SECRET_KEY` wins if both are set.)
 
 Without this, logins succeed but Gmail tokens are never saved and labels won't load.
+
+## 3c. Optional but recommended: migrate fully to new API keys
+
+New-style keys can be rotated/revoked individually without invalidating user sessions,
+which the legacy JWT keys can't. Full migration:
+
+1. Dashboard → Project Settings → API Keys → enable/create the new keys:
+   **publishable** (`sb_publishable_...`) and **secret** (`sb_secret_...`).
+2. Vercel: set `NEXT_PUBLIC_SUPABASE_ANON_KEY` = the publishable key (it's a drop-in
+   replacement), and `SUPABASE_SECRET_KEY` = the secret key.
+3. Edge functions: add a secret named `SB_SECRET_KEY` = the secret key
+   (Dashboard → Edge Functions → Secrets). The functions prefer it over the
+   auto-injected legacy key. Custom secrets may not start with `SUPABASE_`,
+   hence the different name.
+4. Once everything runs on new keys, disable the legacy JWT-based keys on the
+   API Keys page. From then on, JWT-secret rotation no longer breaks API access,
+   and a leaked key can be revoked on its own.
 
 ## 4. Update the edge functions in Supabase
 

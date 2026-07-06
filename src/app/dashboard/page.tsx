@@ -50,7 +50,7 @@ export default async function Dashboard() {
                 }}
             />
 
-            <div className="relative z-10 max-w-md mx-auto p-6">
+            <div className="relative z-10 max-w-5xl mx-auto p-6">
                 {/* Header */}
                 <div className="flex items-center justify-between mb-8">
                     <h1 className="text-2xl font-mono font-bold text-emerald-400">
@@ -66,19 +66,22 @@ export default async function Dashboard() {
                     <ReconnectBanner status={profile.gmail_status} />
                 )}
 
-                {/* Main Toggle Card */}
-                <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-6 mb-6">
-                    <SortingToggle
-                        enabled={profile?.sorting_enabled ?? false}
-                        emailsProcessed={profile?.emails_processed ?? 0}
-                    />
+                {/* Two columns on desktop: status + activity left, labels right */}
+                <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 items-start">
+                    <div className="lg:col-span-2 space-y-6">
+                        <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-6">
+                            <SortingToggle
+                                enabled={profile?.sorting_enabled ?? false}
+                                emailsProcessed={profile?.emails_processed ?? 0}
+                            />
+                        </div>
+                        <ActivityFeed items={recentActivity ?? []} />
+                    </div>
+
+                    <div className="lg:col-span-3">
+                        <LabelSelector selectedLabels={selectedLabels ?? []} />
+                    </div>
                 </div>
-
-                {/* Label Selection */}
-                <LabelSelector selectedLabels={selectedLabels ?? []} />
-
-                {/* Activity Feed */}
-                <ActivityFeed items={recentActivity ?? []} />
 
                 {/* Footer */}
                 <div className="mt-12 pt-6 border-t border-slate-800">

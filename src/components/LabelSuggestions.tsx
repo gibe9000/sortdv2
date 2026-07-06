@@ -43,7 +43,7 @@ export function LabelSuggestions({ hasGmailLabels, onCreated }: Props) {
 
         const { data, error } = await invoke({ action: 'suggest' });
 
-        if (error || !data?.suggestions?.length) {
+        if (error || !Array.isArray(data?.suggestions)) {
             setErrorMsg(
                 data?.error === 'not_enough_emails'
                     ? 'Not enough recent emails to analyze yet.'
@@ -51,6 +51,12 @@ export function LabelSuggestions({ hasGmailLabels, onCreated }: Props) {
                         ? 'The AI is busy right now - try again in a minute.'
                         : "Couldn't generate suggestions. Try again."
             );
+            setPhase('error');
+            return;
+        }
+
+        if (data.suggestions.length === 0) {
+            setErrorMsg('Your existing labels already cover your recent email - nothing new to suggest.');
             setPhase('error');
             return;
         }
@@ -89,7 +95,7 @@ export function LabelSuggestions({ hasGmailLabels, onCreated }: Props) {
 
     if (phase === 'suggesting' || phase === 'creating') {
         return (
-            <div className="bg-slate-900/30 border border-slate-800 rounded-lg p-6 mt-3">
+            <div className="bg-slate-900/30 border border-slate-800 rounded-lg p-6">
                 <p className="text-emerald-400/80 font-mono text-sm animate-pulse">
                     {phase === 'suggesting'
                         ? '✨ Analyzing your recent emails...'
@@ -101,7 +107,7 @@ export function LabelSuggestions({ hasGmailLabels, onCreated }: Props) {
 
     if (phase === 'review') {
         return (
-            <div className="bg-slate-900/30 border border-emerald-500/30 rounded-lg p-4 mt-3">
+            <div className="bg-slate-900/30 border border-emerald-500/30 rounded-lg p-4">
                 <p className="text-slate-300 font-mono text-sm mb-3">
                     ✨ Suggested labels — uncheck what you don&apos;t want:
                 </p>
@@ -148,21 +154,22 @@ export function LabelSuggestions({ hasGmailLabels, onCreated }: Props) {
     }
 
     return (
-        <div className="mt-3">
+        <div>
             {phase === 'error' && (
-                <p className="text-red-400/80 font-mono text-xs mb-2">{errorMsg}</p>
+                <p className="text-amber-400/80 font-mono text-xs mb-2">{errorMsg}</p>
             )}
             <button
                 onClick={handleSuggest}
-                className={`font-mono text-sm transition-colors ${
+                className={`w-full font-mono text-sm transition-colors rounded-lg ${
                     hasGmailLabels
-                        ? 'text-slate-500 hover:text-emerald-400 text-xs'
-                        : 'w-full py-3 bg-emerald-500/10 border border-emerald-500/40 rounded-lg ' +
+                        ? 'py-2.5 border border-dashed border-slate-700 text-slate-400 ' +
+                          'hover:text-emerald-400 hover:border-emerald-500/50'
+                        : 'py-3 bg-emerald-500/10 border border-emerald-500/40 ' +
                           'text-emerald-400 hover:bg-emerald-500/20 font-bold'
                 }`}
             >
                 {hasGmailLabels
-                    ? '✨ Suggest more labels from my email'
+                    ? '✨ Suggest new labels from my recent email'
                     : '✨ Suggest labels based on my recent email'}
             </button>
         </div>

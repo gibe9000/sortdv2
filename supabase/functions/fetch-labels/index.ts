@@ -13,9 +13,12 @@ serve(async (req) => {
     }
 
     try {
+        // SB_SECRET_KEY (custom secret, sb_secret_...) takes precedence; the
+        // auto-injected legacy SUPABASE_SERVICE_ROLE_KEY is the fallback.
+        // (Custom edge-function secrets may not start with SUPABASE_.)
         const supabase = createClient(
             Deno.env.get('SUPABASE_URL')!,
-            Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+            (Deno.env.get('SB_SECRET_KEY') ?? Deno.env.get('SUPABASE_SERVICE_ROLE_KEY'))!
         );
 
         const authHeader = req.headers.get('Authorization')!;

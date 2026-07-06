@@ -1,0 +1,170 @@
+// src/components/LabelSuggestions.tsx
+'use client';
+
+import { createClient } from '@/lib/supabase/client';
+import { useState } from 'react';
+
+interface Suggestion {
+    name: string;
+    description: string;
+}
+
+export interface CreatedLabel {
+    id: string;
+    name: string;
+    description: string | null;
+}
+
+interface Props {
+    hasGmailLabels: boolean;
+    onCreated: (created: CreatedLabel[]) => void;
+}
+
+type Phase = 'idle' | 'suggesting' | 'review' | 'creating' | 'error';
+
+export function LabelSuggestions({ hasGmailLabels, onCreated }: Props) {
+    const [phase, setPhase] = useState<Phase>('idle');
+    const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+    const [checked, setChecked] = useState<Set<number>>(new Set());
+    const [errorMsg, setErrorMsg] = useState('');
+    const supabase = createClient();
+
+    const invoke = async (body: object) => {
+        const { data: { session } } = await supabase.auth.getSession();
+        return supabase.functions.invoke('suggest-labels', {
+            body,
+            headers: { Authorization: `Bearer ${session?.access_token}` },
+        });
+    };
+
+    const handleSuggest = async () => {
+        setPhase('suggesting');
+        setErrorMsg('');
+
+        const { data, error } = await invoke({ action: 'suggest' });
+
+        if (error || !data?.suggestions?.length) {
+            setErrorMsg(
+                data?.error === 'not_enough_emails'
+                    ? 'Not enough recent emails to analyze yet.'
+                    : data?.error === 'rate_limit'
+                        ? 'The AI is busy right now - try again in a minute.'
+                        : "Couldn't generate suggestions. Try again."
+            );
+            setPhase('error');
+            return;
+        }
+
+        setSuggestions(data.suggestions);
+        setChecked(new Set(data.suggestions.map((_: Suggestion, i: number) => i)));
+        setPhase('review');
+    };
+
+    const toggleSuggestion = (index: number) => {
+        setChecked(prev => {
+            const next = new Set(prev);
+            if (next.has(index)) next.delete(index);
+            else next.add(index);
+            return next;
+        });
+    };
+
+    const handleCreate = async () => {
+        const chosen = suggestions.filter((_, i) => checked.has(i));
+        if (chosen.length === 0) return;
+
+        setPhase('creating');
+        const { data, error } = await invoke({ action: 'create', labels: chosen });
+
+        if (error || !data?.created?.length) {
+            setErrorMsg("Couldn't create the labels in Gmail. Try again.");
+            setPhase('error');
+            return;
+        }
+
+        setPhase('idle');
+        setSuggestions([]);
+        onCreated(data.created as CreatedLabel[]);
+    };
+
+    if (phase === 'suggesting' || phase === 'creating') {
+        return (
+            <div className="bg-slate-900/30 border border-slate-800 rounded-lg p-6 mt-3">
+                <p className="text-emerald-400/80 font-mono text-sm animate-pulse">
+                    {phase === 'suggesting'
+                        ? '✨ Analyzing your recent emails...'
+                        : '✨ Creating labels in your Gmail...'}
+                </p>
+            </div>
+        );
+    }
+
+    if (phase === 'review') {
+        return (
+            <div className="bg-slate-900/30 border border-emerald-500/30 rounded-lg p-4 mt-3">
+                <p className="text-slate-300 font-mono text-sm mb-3">
+                    ✨ Suggested labels — uncheck what you don&apos;t want:
+                </p>
+                <div className="space-y-2 mb-4">
+                    {suggestions.map((s, i) => (
+                        <label
+                            key={i}
+                            className="flex items-start gap-3 p-2 rounded hover:bg-slate-800/30 cursor-pointer select-none"
+                        >
+                            <input
+                                type="checkbox"
+                                checked={checked.has(i)}
+                                onChange={() => toggleSuggestion(i)}
+                                className="mt-1 accent-emerald-500"
+                            />
+                            <span>
+                                <span className="text-slate-200 font-mono text-sm">{s.name}</span>
+                                <span className="block text-slate-500 font-mono text-xs mt-0.5">
+                                    {s.description}
+                                </span>
+                            </span>
+                        </label>
+                    ))}
+                </div>
+                <div className="flex items-center gap-3">
+                    <button
+                        onClick={handleCreate}
+                        disabled={checked.size === 0}
+                        className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-black
+                                   font-mono text-xs font-bold uppercase tracking-wider
+                                   transition-colors disabled:opacity-40"
+                    >
+                        Create {checked.size} label{checked.size === 1 ? '' : 's'}
+                    </button>
+                    <button
+                        onClick={() => { setPhase('idle'); setSuggestions([]); }}
+                        className="text-slate-500 hover:text-slate-300 font-mono text-xs transition-colors"
+                    >
+                        Cancel
+                    </button>
+                </div>
+            </div>
+        );
+    }
+
+    return (
+        <div className="mt-3">
+            {phase === 'error' && (
+                <p className="text-red-400/80 font-mono text-xs mb-2">{errorMsg}</p>
+            )}
+            <button
+                onClick={handleSuggest}
+                className={`font-mono text-sm transition-colors ${
+                    hasGmailLabels
+                        ? 'text-slate-500 hover:text-emerald-400 text-xs'
+                        : 'w-full py-3 bg-emerald-500/10 border border-emerald-500/40 rounded-lg ' +
+                          'text-emerald-400 hover:bg-emerald-500/20 font-bold'
+                }`}
+            >
+                {hasGmailLabels
+                    ? '✨ Suggest more labels from my email'
+                    : '✨ Suggest labels based on my recent email'}
+            </button>
+        </div>
+    );
+}

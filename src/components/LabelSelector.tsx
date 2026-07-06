@@ -4,6 +4,7 @@
 import { createClient } from '@/lib/supabase/client';
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
+import { LabelSuggestions, CreatedLabel } from '@/components/LabelSuggestions';
 
 interface GmailLabel {
     id: string;
@@ -141,6 +142,24 @@ export function LabelSelector({ selectedLabels }: Props) {
         });
     };
 
+    // Labels created via AI suggestions arrive already selected server-side;
+    // reflect that in local state without waiting for a refetch.
+    const handleSuggestionsCreated = (created: CreatedLabel[]) => {
+        setGmailLabels(prev => {
+            const known = new Set(prev.map(l => l.id));
+            return [...prev, ...created.filter(c => !known.has(c.id)).map(c => ({ id: c.id, name: c.name }))];
+        });
+        setSelected(prev => new Set([...prev, ...created.map(c => c.id)]));
+        setSettings(prev => {
+            const next = new Map(prev);
+            for (const c of created) {
+                next.set(c.id, { description: c.description ?? '', archiveOnLabel: false });
+            }
+            return next;
+        });
+        router.refresh();
+    };
+
     return (
         <div>
             <div className="flex items-center justify-between mb-4">
@@ -176,12 +195,17 @@ export function LabelSelector({ selectedLabels }: Props) {
                     </button>
                 </div>
             ) : gmailLabels.length === 0 ? (
-                <div className="bg-slate-900/30 border border-dashed border-slate-700 rounded-lg p-6">
-                    <p className="text-slate-500 font-mono text-sm text-center">
-                        No labels found in Gmail.
-                        <br />
-                        <span className="text-slate-600">Create labels in Gmail first.</span>
-                    </p>
+                <div>
+                    <div className="bg-slate-900/30 border border-dashed border-slate-700 rounded-lg p-6">
+                        <p className="text-slate-500 font-mono text-sm text-center">
+                            No labels found in Gmail.
+                            <br />
+                            <span className="text-slate-600">
+                                Let Sortd suggest some based on your recent email.
+                            </span>
+                        </p>
+                    </div>
+                    <LabelSuggestions hasGmailLabels={false} onCreated={handleSuggestionsCreated} />
                 </div>
             ) : (
                 <div className="bg-slate-900/30 border border-slate-800 rounded-lg divide-y divide-slate-800/50">
@@ -256,6 +280,10 @@ export function LabelSelector({ selectedLabels }: Props) {
                 <p className="text-amber-500/70 text-xs font-mono mt-3">
                     Select at least one label to enable sorting
                 </p>
+            )}
+
+            {gmailLabels.length > 0 && !loading && !loadError && (
+                <LabelSuggestions hasGmailLabels={true} onCreated={handleSuggestionsCreated} />
             )}
         </div>
     );

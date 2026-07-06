@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { SortingToggle } from '@/components/SortingToggle';
 import { LabelSelector } from '@/components/LabelSelector';
-import { LogoutButton } from '@/components/LogoutButton';
+import { AccountControls } from '@/components/AccountControls';
 import { ReconnectBanner } from '@/components/ReconnectBanner';
 import { ActivityFeed } from '@/components/ActivityFeed';
 
@@ -61,8 +61,10 @@ export default async function Dashboard() {
                     </span>
                 </div>
 
-                {/* Gmail connection lost -> reconnect */}
-                {profile?.gmail_status === 'reconnect_required' && <ReconnectBanner />}
+                {/* Gmail connection lost or disconnected -> reconnect */}
+                {profile?.gmail_status && profile.gmail_status !== 'connected' && (
+                    <ReconnectBanner status={profile.gmail_status} />
+                )}
 
                 {/* Main Toggle Card */}
                 <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-6 mb-6">
@@ -80,7 +82,7 @@ export default async function Dashboard() {
 
                 {/* Footer */}
                 <div className="mt-12 pt-6 border-t border-slate-800">
-                    <LogoutButton />
+                    <AccountControls />
                 </div>
             </div>
         </div>

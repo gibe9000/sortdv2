@@ -1,3 +1,22 @@
+# Update 2026-07-06b: feature batch (suggestions, batched AI, account controls)
+
+Rollout for the second batch (AI label suggestions, batched Gemini calls,
+no-consent returning logins, Disconnect/Delete account):
+
+1. **SQL editor:** run `supabase/migrations/005_selected_labels_unique.sql`.
+2. **Dashboard → Edge Functions:**
+   - `process-emails`: paste the updated code (now batches all emails into one
+     Gemini call) and Deploy. JWT verification stays **OFF**.
+   - **Create a NEW function named `suggest-labels`**, paste
+     `supabase/functions/suggest-labels/index.ts`, Deploy. JWT verification **ON**.
+     It uses the same secrets as the others (no new secrets needed).
+3. **Vercel:** merge/deploy the branch. No new env vars.
+4. Verify: log in fresh (no Google consent screen for returning users), footer
+   shows Sign out / Disconnect Gmail / Delete account, and with no labels the
+   dashboard offers "✨ Suggest labels based on my recent email".
+
+---
+
 # Deploying the audit fixes
 
 The code on this branch fixes all Critical/High findings from the 2026-07-03 audit and adds

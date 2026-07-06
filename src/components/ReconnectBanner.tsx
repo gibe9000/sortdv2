@@ -5,7 +5,11 @@ import { createClient } from '@/lib/supabase/client';
 import { googleOAuthOptions } from '@/lib/googleOAuth';
 import { useState } from 'react';
 
-export function ReconnectBanner() {
+interface Props {
+    status?: string;
+}
+
+export function ReconnectBanner({ status = 'reconnect_required' }: Props) {
     const [loading, setLoading] = useState(false);
 
     const handleReconnect = async () => {
@@ -13,19 +17,24 @@ export function ReconnectBanner() {
         const supabase = createClient();
         await supabase.auth.signInWithOAuth({
             provider: 'google',
-            options: googleOAuthOptions(),
+            // We need a fresh refresh token here, so force the consent screen
+            options: googleOAuthOptions({ forceConsent: true }),
         });
     };
+
+    const isDisconnected = status === 'disconnected';
 
     return (
         <div className="bg-amber-500/10 border border-amber-500/40 rounded-lg p-4 mb-6">
             <div className="flex items-center justify-between gap-4">
                 <div>
                     <p className="text-amber-400 font-mono text-sm font-bold">
-                        GMAIL CONNECTION LOST
+                        {isDisconnected ? 'GMAIL DISCONNECTED' : 'GMAIL CONNECTION LOST'}
                     </p>
                     <p className="text-slate-400 text-xs font-mono mt-1">
-                        Sorting is paused. Reconnect your Google account to resume.
+                        {isDisconnected
+                            ? 'Connect your Google account to start sorting again.'
+                            : 'Sorting is paused. Reconnect your Google account to resume.'}
                     </p>
                 </div>
                 <button
@@ -35,7 +44,7 @@ export function ReconnectBanner() {
                                font-mono text-xs font-bold uppercase tracking-wider
                                transition-colors disabled:opacity-50"
                 >
-                    {loading ? '...' : 'Reconnect'}
+                    {loading ? '...' : isDisconnected ? 'Connect' : 'Reconnect'}
                 </button>
             </div>
         </div>

@@ -27,6 +27,10 @@ export function LabelSuggestions({ hasGmailLabels, onCreated }: Props) {
     const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
     const [checked, setChecked] = useState<Set<number>>(new Set());
     const [errorMsg, setErrorMsg] = useState('');
+    // Paging through the mailbox, 50 emails per round
+    const [nextPageToken, setNextPageToken] = useState<string | null>(null);
+    // Names the user has passed on this session - never suggested again
+    const [rejected, setRejected] = useState<string[]>([]);
     const supabase = createClient();
 
     const invoke = async (body: object) => {
@@ -37,26 +41,41 @@ export function LabelSuggestions({ hasGmailLabels, onCreated }: Props) {
         });
     };
 
-    const handleSuggest = async () => {
+    const runSuggest = async (opts: { pageToken?: string | null; extraRejected?: string[] }) => {
         setPhase('suggesting');
         setErrorMsg('');
 
-        const { data, error } = await invoke({ action: 'suggest' });
+        const excludeList = [...rejected, ...(opts.extraRejected ?? [])];
+        if (opts.extraRejected?.length) setRejected(excludeList);
+
+        const { data, error } = await invoke({
+            action: 'suggest',
+            ...(opts.pageToken ? { pageToken: opts.pageToken } : {}),
+            ...(excludeList.length ? { exclude: excludeList } : {}),
+        });
 
         if (error || !Array.isArray(data?.suggestions)) {
             setErrorMsg(
                 data?.error === 'not_enough_emails'
                     ? 'Not enough recent emails to analyze yet.'
-                    : data?.error === 'rate_limit'
-                        ? 'The AI is busy right now - try again in a minute.'
-                        : "Couldn't generate suggestions. Try again."
+                    : data?.error === 'no_more_emails'
+                        ? "That's the whole mailbox - no more emails to analyze."
+                        : data?.error === 'rate_limit'
+                            ? 'The AI is busy right now - try again in a minute.'
+                            : "Couldn't generate suggestions. Try again."
             );
             setPhase('error');
             return;
         }
 
+        setNextPageToken(data.nextPageToken ?? null);
+
         if (data.suggestions.length === 0) {
-            setErrorMsg('Your existing labels already cover your recent email - nothing new to suggest.');
+            setErrorMsg(
+                opts.pageToken
+                    ? 'No new label ideas in that batch of older mail either.'
+                    : 'Your existing labels already cover your recent email - nothing new to suggest.'
+            );
             setPhase('error');
             return;
         }
@@ -65,6 +84,15 @@ export function LabelSuggestions({ hasGmailLabels, onCreated }: Props) {
         setChecked(new Set(data.suggestions.map((_: Suggestion, i: number) => i)));
         setPhase('review');
     };
+
+    const handleSuggest = () => runSuggest({ pageToken: nextPageToken });
+
+    // Reject everything on screen and analyze the next 50 older emails
+    const handleMoreSuggestions = () =>
+        runSuggest({
+            pageToken: nextPageToken,
+            extraRejected: suggestions.map(s => s.name),
+        });
 
     const toggleSuggestion = (index: number) => {
         setChecked(prev => {
@@ -78,6 +106,10 @@ export function LabelSuggestions({ hasGmailLabels, onCreated }: Props) {
     const handleCreate = async () => {
         const chosen = suggestions.filter((_, i) => checked.has(i));
         if (chosen.length === 0) return;
+
+        // Unchecked ideas count as rejected for future rounds
+        const passed = suggestions.filter((_, i) => !checked.has(i)).map(s => s.name);
+        if (passed.length) setRejected(prev => [...prev, ...passed]);
 
         setPhase('creating');
         const { data, error } = await invoke({ action: 'create', labels: chosen });
@@ -98,7 +130,7 @@ export function LabelSuggestions({ hasGmailLabels, onCreated }: Props) {
             <div className="bg-slate-900/30 border border-slate-800 rounded-lg p-6">
                 <p className="text-emerald-400/80 font-mono text-sm animate-pulse">
                     {phase === 'suggesting'
-                        ? '✨ Analyzing your recent emails...'
+                        ? '✨ Analyzing your emails...'
                         : '✨ Creating labels in your Gmail...'}
                 </p>
             </div>
@@ -132,7 +164,7 @@ export function LabelSuggestions({ hasGmailLabels, onCreated }: Props) {
                         </label>
                     ))}
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 flex-wrap">
                     <button
                         onClick={handleCreate}
                         disabled={checked.size === 0}
@@ -141,6 +173,17 @@ export function LabelSuggestions({ hasGmailLabels, onCreated }: Props) {
                                    transition-colors disabled:opacity-40"
                     >
                         Create {checked.size} label{checked.size === 1 ? '' : 's'}
+                    </button>
+                    <button
+                        onClick={handleMoreSuggestions}
+                        disabled={!nextPageToken}
+                        title={nextPageToken
+                            ? 'Skip these and analyze the next 50 older emails'
+                            : 'No more emails to analyze'}
+                        className="text-slate-400 hover:text-emerald-400 font-mono text-xs
+                                   transition-colors disabled:opacity-40 disabled:hover:text-slate-400"
+                    >
+                        ↻ More suggestions
                     </button>
                     <button
                         onClick={() => { setPhase('idle'); setSuggestions([]); }}

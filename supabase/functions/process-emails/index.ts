@@ -62,6 +62,30 @@ serve(async (req) => {
     }
 });
 
+// Decode Gmail's base64url body data to text
+function decodeBody(data: string): string {
+    try {
+        const bin = atob(data.replace(/-/g, '+').replace(/_/g, '/'));
+        const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+        return new TextDecoder().decode(bytes);
+    } catch {
+        return '';
+    }
+}
+
+// Walk the MIME tree for the first text/plain part
+function extractPlainText(payload: any): string {
+    if (!payload) return '';
+    if (payload.mimeType === 'text/plain' && payload.body?.data) {
+        return decodeBody(payload.body.data);
+    }
+    for (const part of payload.parts || []) {
+        const text = extractPlainText(part);
+        if (text) return text;
+    }
+    return '';
+}
+
 async function markReconnectRequired(supabase: any, userId: string) {
     console.warn(`[User ${userId}] Gmail connection broken - marking reconnect_required`);
     await supabase
@@ -123,10 +147,10 @@ async function processUserEmails(supabase: any, userId: string): Promise<number>
 
     const selectedLabelIds = new Set(selectedLabels.map((l: any) => l.gmail_label_id));
 
-    // --- Collect phase: gather metadata for every new message ---
+    // --- Collect phase: gather details for every new message ---
     type PendingEmail = {
         id: string;
-        emailData: { subject: string; from: string; snippet: string };
+        emailData: { subject: string; from: string; body: string };
     };
     const pending: PendingEmail[] = [];
 
@@ -134,7 +158,7 @@ async function processUserEmails(supabase: any, userId: string): Promise<number>
         if (alreadyProcessed.has(msg.id)) continue;
 
         const detailResponse = await fetch(
-            `https://gmail.googleapis.com/gmail/v1/users/me/messages/${msg.id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject`,
+            `https://gmail.googleapis.com/gmail/v1/users/me/messages/${msg.id}?format=full`,
             { headers: { Authorization: `Bearer ${accessToken}` } }
         );
 
@@ -145,10 +169,15 @@ async function processUserEmails(supabase: any, userId: string): Promise<number>
 
         const email = await detailResponse.json();
         const headers = email.payload?.headers || [];
+        // A bounded plain-text excerpt gives the categorizer real content to
+        // work with (vague subjects, forwarded mail) at a capped token cost.
+        const bodyText = (extractPlainText(email.payload) || email.snippet || '')
+            .replace(/\s+/g, ' ')
+            .trim();
         const emailData = {
             subject: (headers.find((h: any) => h.name === 'Subject')?.value || '').slice(0, 200),
             from: (headers.find((h: any) => h.name === 'From')?.value || '').slice(0, 200),
-            snippet: email.snippet || ''
+            body: bodyText.slice(0, 500)
         };
 
         // Skip mail the user (or a Gmail filter) already put in a selected label,
@@ -264,7 +293,7 @@ async function processUserEmails(supabase: any, userId: string): Promise<number>
 // Categorize a whole batch of emails with a single Gemini call.
 // Returns an array parallel to `emails`: matched label IDs per email.
 async function categorizeEmails(
-    emails: Array<{ subject: string; from: string; snippet: string }>,
+    emails: Array<{ subject: string; from: string; body: string }>,
     labels: Array<{ gmail_label_id: string; gmail_label_name: string; description?: string | null }>
 ): Promise<string[][]> {
 
@@ -273,7 +302,7 @@ async function categorizeEmails(
         .join('\n\n');
 
     const emailList = emails
-        .map((e, i) => `--- Email ${i + 1} ---\nFrom: ${e.from}\nSubject: ${e.subject}\nBody:\n${e.snippet}`)
+        .map((e, i) => `--- Email ${i + 1} ---\nFrom: ${e.from}\nSubject: ${e.subject}\nBody:\n${e.body}`)
         .join('\n\n');
 
     const prompt = `You are an email categorizer. For EACH numbered email below, pick up to 2 matching Gmail labels, or none if nothing fits.

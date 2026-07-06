@@ -42,6 +42,7 @@ export function LabelSelector({ selectedLabels }: Props) {
     const [loading, setLoading] = useState(true);
     const [loadError, setLoadError] = useState(false);
     const [syncing, setSyncing] = useState(false);
+    const [describing, setDescribing] = useState<Set<string>>(new Set());
     const router = useRouter();
     const supabase = createClient();
 
@@ -138,6 +139,29 @@ export function LabelSelector({ selectedLabels }: Props) {
             const next = new Map(prev);
             const current = next.get(labelId);
             next.set(labelId, { description, archiveOnLabel: current?.archiveOnLabel ?? false });
+            return next;
+        });
+    };
+
+    // Draft a description from the mail actually in the label; the result
+    // lands in the (editable) input and is saved - the user can rewrite it.
+    const handleAutoDescribe = async (label: GmailLabel) => {
+        setDescribing(prev => new Set([...prev, label.id]));
+
+        const { data: { session } } = await supabase.auth.getSession();
+        const { data } = await supabase.functions.invoke('suggest-labels', {
+            body: { action: 'describe', labelId: label.id, labelName: label.name },
+            headers: { Authorization: `Bearer ${session?.access_token}` },
+        });
+
+        if (data?.description) {
+            handleDescriptionChange(label.id, data.description);
+            await saveDescription(label.id, data.description);
+        }
+
+        setDescribing(prev => {
+            const next = new Set(prev);
+            next.delete(label.id);
             return next;
         });
     };
@@ -260,17 +284,35 @@ export function LabelSelector({ selectedLabels }: Props) {
                                 {/* Per-label settings, shown when selected */}
                                 {isSelected && (
                                     <div className="px-3 pb-3 space-y-2">
-                                        <input
-                                            type="text"
-                                            value={labelSettings?.description ?? ''}
-                                            onChange={(e) => handleDescriptionChange(label.id, e.target.value)}
-                                            onBlur={(e) => saveDescription(label.id, e.target.value)}
-                                            placeholder="Describe what belongs here (improves AI accuracy)"
-                                            maxLength={200}
-                                            className="w-full bg-slate-900/60 border border-slate-700 rounded px-3 py-1.5
-                                                       text-slate-300 font-mono text-xs placeholder-slate-600
-                                                       focus:outline-none focus:border-emerald-500/60"
-                                        />
+                                        <div className="flex gap-1.5">
+                                            <input
+                                                type="text"
+                                                value={labelSettings?.description ?? ''}
+                                                onChange={(e) => handleDescriptionChange(label.id, e.target.value)}
+                                                onBlur={(e) => saveDescription(label.id, e.target.value)}
+                                                placeholder={describing.has(label.id)
+                                                    ? 'Reading emails in this label...'
+                                                    : 'Describe what belongs here (improves AI accuracy)'}
+                                                maxLength={200}
+                                                disabled={describing.has(label.id)}
+                                                className="w-full bg-slate-900/60 border border-slate-700 rounded px-3 py-1.5
+                                                           text-slate-300 font-mono text-xs placeholder-slate-600
+                                                           focus:outline-none focus:border-emerald-500/60
+                                                           disabled:opacity-60"
+                                            />
+                                            {!(labelSettings?.description) && (
+                                                <button
+                                                    onClick={() => handleAutoDescribe(label)}
+                                                    disabled={describing.has(label.id)}
+                                                    title="Draft a description from the emails already in this label"
+                                                    className="shrink-0 px-2 rounded border border-slate-700 text-slate-400
+                                                               hover:text-emerald-400 hover:border-emerald-500/50
+                                                               transition-colors text-xs disabled:opacity-50"
+                                                >
+                                                    {describing.has(label.id) ? '...' : '✨'}
+                                                </button>
+                                            )}
+                                        </div>
                                         <label className="flex items-center gap-2 cursor-pointer select-none">
                                             <input
                                                 type="checkbox"

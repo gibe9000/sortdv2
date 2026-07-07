@@ -12,8 +12,11 @@ const MODEL_FAST = 'gemini-3.1-flash-lite';
 const MODEL_SMART = 'gemini-3.5-flash';
 // Below this, the fast model's verdict is re-run on the smart model
 const ESCALATE_BELOW = 0.7;
-// Below this, no label is applied at all - wrong labels are worse than none
-const APPLY_MIN = 0.6;
+// Apply thresholds: the fast model must be sure; the smart model earned
+// more leeway - it only sees cases the fast model was already unsure about,
+// and its judgment is what we escalated FOR.
+const APPLY_MIN_FAST = 0.6;
+const APPLY_MIN_SMART = 0.4;
 
 serve(async (req) => {
     // This function is invoked only by pg_cron with a shared secret header.
@@ -225,6 +228,7 @@ async function processUserEmails(supabase: any, userId: string): Promise<number>
     const escalateIdx = batchResults
         .map((r, i) => (r.confidence < ESCALATE_BELOW ? i : -1))
         .filter((i) => i >= 0);
+    const decidedBySmart = new Set<number>();
 
     if (escalateIdx.length > 0) {
         console.log(`[User ${userId}] Escalating ${escalateIdx.length}/${pending.length} low-confidence emails to ${MODEL_SMART}`);
@@ -236,9 +240,10 @@ async function processUserEmails(supabase: any, userId: string): Promise<number>
             );
             escalateIdx.forEach((origIdx, j) => {
                 batchResults[origIdx] = smartResults[j];
+                decidedBySmart.add(origIdx);
             });
         } catch (e: any) {
-            // Fall back to the fast model's verdicts; APPLY_MIN still guards them
+            // Fall back to the fast model's verdicts; the fast threshold still guards them
             console.error(`[User ${userId}] Escalation failed, keeping fast-model results:`, e.message || e);
         }
     }
@@ -249,9 +254,10 @@ async function processUserEmails(supabase: any, userId: string): Promise<number>
     for (let i = 0; i < pending.length; i++) {
         const { id: msgId, emailData } = pending[i];
         const { labelIds: suggested, confidence, reason } = batchResults[i];
-        const matchedLabelIds = confidence >= APPLY_MIN ? suggested : [];
+        const applyMin = decidedBySmart.has(i) ? APPLY_MIN_SMART : APPLY_MIN_FAST;
+        const matchedLabelIds = confidence >= applyMin ? suggested : [];
         if (suggested.length > 0 && matchedLabelIds.length === 0) {
-            console.log(`[User ${userId}] Abstaining on msg ${msgId} (confidence ${confidence}): ${reason}`);
+            console.log(`[User ${userId}] Abstaining on msg ${msgId} (confidence ${confidence} < ${applyMin}): ${reason}`);
         }
 
         try {
